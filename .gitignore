@@ -127,3 +127,10 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# ethash_data
+ethash_data/cache*
+ethash_data/dataset*
+
+# vscode
+.vscode

@@ -1,2 +1,2 @@
 # ethash
-Ethash implementation in Python 3
+Simple Ethash implementation in Python 3
