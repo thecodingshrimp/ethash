@@ -8,6 +8,6 @@ setup(
     install_requires=[
         'wheel',
         'pycryptodome==3.14.1',
-        'numpy==1.22.2'
+        'numpy'
     ]
 )
