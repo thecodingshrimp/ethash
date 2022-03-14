@@ -130,6 +130,7 @@ dmypy.json
 
 # ethash_data
 ethash_data/cache*
+ethash_data/full*
 ethash_data/dataset*
 
 # vscode
