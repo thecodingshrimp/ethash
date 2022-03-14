@@ -1,10 +1,10 @@
 import copy
 import os
 from typing import Callable, List, Mapping
-from numpy import uint32, uint64
+from numpy import uint64
 from Crypto.Hash import keccak
 
-uint32_hash = List[uint32]
+uint32_hash = List[int]
 uint32_hash_array = List[uint32_hash]
 
 WORD_BYTES = 4                    # bytes in word
@@ -29,11 +29,12 @@ def file_handler(is_cache: bool) -> Callable[[Callable[[int, str], uint32_hash_a
             if not os.path.exists(file_path):
                 # file does not exist
                 # create
-                data = create_func(block_nr, dir_path)
+                data = create_func(block_nr, file_path)
                 # write to file
                 write_to_file(file_path, data)
                 return data
-            return read_from_file(file_path)
+            element_amount = (get_cache_size(block_nr) if is_cache else get_full_size(block_nr)) // HASH_BYTES
+            return read_from_file(file_path, element_amount)
         return get_or_create
     return handling_creation
 
@@ -80,12 +81,12 @@ def create_dataset(block_nr: int, dir_path: str) -> uint32_hash_array:
         list: uint32_hash_array
     """
     cache: uint32_hash_array = create_cache(block_nr, dir_path)
-    full_size: uint32 = get_full_size(block_nr)
-    dataset: uint32_hash_array = [calc_dataset_item(cache, uint32(i)) for i in range(full_size // HASH_BYTES)]
+    full_size: int = get_full_size(block_nr)
+    dataset: uint32_hash_array = [calc_dataset_item(cache, i) for i in range(full_size // HASH_BYTES)]
     
     return dataset
 
-def hashimoto(dataset_lookup: Callable[[uint32_hash_array, uint32], uint32_hash]) -> Callable[[bytearray, bytearray, int, uint32_hash_array], Mapping[str, bytes]]:
+def hashimoto(dataset_lookup: Callable[[uint32_hash_array, int], uint32_hash]) -> Callable[[bytearray, bytearray, int, uint32_hash_array], Mapping[str, bytes]]:
     """ Decorator function. Returns the hashimoto algorithm.
 
     Args:
@@ -103,7 +104,7 @@ def hashimoto(dataset_lookup: Callable[[uint32_hash_array, uint32], uint32_hash]
         header += nonce[::-1]
         s: uint32_hash = keccak_512(header)
         # start the mix with replicated s
-        mix: List[uint32] = []
+        mix: List[int] = []
         for _ in range(MIX_BYTES // HASH_BYTES):
             mix.extend(s)
         # mix in random dataset nodes
@@ -111,10 +112,10 @@ def hashimoto(dataset_lookup: Callable[[uint32_hash_array, uint32], uint32_hash]
             p = fnv(i ^ s[0], mix[i % w]) % (n // mixhashes) * mixhashes
             newdata = []
             for j in range(MIX_BYTES // HASH_BYTES):
-                newdata.extend(dataset_lookup(dataset, uint32(p + j)))
+                newdata.extend(dataset_lookup(dataset, int(p + j)))
             mix = list(map(fnv, mix, newdata))
         # compress mix
-        cmix: List[uint32] = []
+        cmix: List[int] = []
         for i in range(0, len(mix), 4):
             cmix.append(fnv(fnv(fnv(mix[i], mix[i+1]), mix[i+2]), mix[i+3]))
         return {
@@ -125,7 +126,7 @@ def hashimoto(dataset_lookup: Callable[[uint32_hash_array, uint32], uint32_hash]
     return algorithm
 
 @hashimoto
-def hashimoto_light(cache: uint32_hash_array, index: uint32) -> uint32_hash:
+def hashimoto_light(cache: uint32_hash_array, index: int) -> uint32_hash:
     """Computes dataset item from cache.
 
     Args:
@@ -138,7 +139,7 @@ def hashimoto_light(cache: uint32_hash_array, index: uint32) -> uint32_hash:
     return calc_dataset_item(cache, index)
 
 @hashimoto
-def hashimoto_full(dataset: uint32_hash_array, x: uint32) -> uint32_hash:
+def hashimoto_full(dataset: uint32_hash_array, x: int) -> uint32_hash:
     """Gets dataset item from dataset.
 
     Args:
@@ -150,7 +151,7 @@ def hashimoto_full(dataset: uint32_hash_array, x: uint32) -> uint32_hash:
     """
     return dataset[x]
 
-def calc_dataset_item(cache: uint32_hash_array, i: uint32) -> uint32_hash:
+def calc_dataset_item(cache: uint32_hash_array, i: int) -> uint32_hash:
     n = len(cache)
     r = HASH_BYTES // WORD_BYTES
     # initialize the mix
@@ -171,15 +172,15 @@ def get_cache_size(block_number: int) -> int:
         sz -= 2 * HASH_BYTES
     return sz
 
-def get_full_size(block_number: int) -> uint32:
+def get_full_size(block_number: int) -> int:
     sz = DATASET_BYTES_INIT + DATASET_BYTES_GROWTH * (block_number // EPOCH_LENGTH)
     sz -= MIX_BYTES
     while not isprime(sz / MIX_BYTES):
         sz -= 2 * MIX_BYTES
-    return uint32(sz)
+    return sz
 
-def fnv(v1: uint64, v2: uint64) -> uint32:
-    return uint32(((v1 * FNV_PRIME) ^ v2) % 2**32)
+def fnv(v1: uint64, v2: uint64) -> int:
+    return ((v1 * FNV_PRIME) ^ v2) % 2**32
 
 def get_seedhash(block_number: int) -> bytes:
     s = b'\x00' * 32
@@ -191,11 +192,12 @@ def create_file_path(is_cache: bool, dir: str, block_nr: int) -> str:
     dir = f'{dir}/' if dir[-1] != '/' else dir
     if not os.path.isdir(dir):
         os.mkdir(dir)
-    file_path = f'{dir}{"cache" if is_cache else "dataset"}_rev_{REVISION}_epoch_{block_nr // EPOCH_LENGTH}'
+    first_8_bytes_seedhash = get_seedhash(block_nr).hex()[:16]
+    file_path = f'{dir}{"cache" if is_cache else "full"}-R{REVISION}-{first_8_bytes_seedhash}'
     return file_path
 
 # Assumes little endian bit ordering (same as Intel architectures)
-def decode_int(s: bytes) -> uint32:
+def decode_int(s: bytes) -> int:
     """Decodes little endian encoded hex byte to little endian int
 
     Args:
@@ -204,18 +206,18 @@ def decode_int(s: bytes) -> uint32:
     Returns:
         int: little endian int
     """
-    return uint32(int(s[::-1].hex(), 16)) if s else 0
+    return int(s[::-1].hex(), 16) if s else 0
 
-def encode_int(s: uint32) -> bytes:
-    """Encodes int to little endian hex
+def encode_int(s: int) -> bytes:
+    """Encodes int to little endian bytes
 
     Args:
-        s (uint32): uint32 to encode
+        s (int): int to encode
 
     Returns:
-        bytes: encoded uint32 in little endian by
+        bytes: encoded int in little endian by
     """
-    return s.tobytes()
+    return s.to_bytes(4, 'little')
 
 def serialize_hash(h: uint32_hash) -> bytes:
     """ Serialize hash
@@ -246,19 +248,21 @@ def serialize_cache(ds):
     return ''.join([serialize_hash(h) for h in ds])
 
 def write_to_file(file_path: str, data: uint32_hash_array):
-    """Takes uint32_hash_array and writes every entry as hex to file.
+    """Takes uint32_hash_array and writes every entry as little endian bytes to file.
 
     Args:
         file_path (str): relative file path
         data (uint32_hash_array): uint_32[*][16]
     """
     with open(file_path, 'w') as f:
+        # write magic bytes
+        f.write(b'\xad\xde\xe1\xfe\xfe\xca\xdd\xba')
+        # write the real numbers
         for num_array in data:
-            concatenated_hex = ''.join([int(num).to_bytes(4, 'big').hex() for num in num_array])
-            f.write(f'{concatenated_hex}\n')
+            f.write(''.join([int(num).to_bytes(4, 'little') for num in num_array]))
         
-def read_from_file(file_path: str) -> uint32_hash_array:
-    """Reads 64byte hex hashes into uint_32[*][16] array
+def read_from_file(file_path: str, element_amount: int) -> uint32_hash_array:
+    """Reads 64byte hashes (little endian) into uint_32[*][16] array
 
     Args:
         file_path (str): relative path to file
@@ -267,15 +271,10 @@ def read_from_file(file_path: str) -> uint32_hash_array:
         list: uint_32[*][16] array
     """
     with open(file_path, 'r') as f:
-        raw_data = f.read()
-        split_data = raw_data.split('\n')
-        if len(split_data) <= 10:
-            print(f'path: {file_path} is empty or has unsufficient entries to be dataset/cache. Remove it before we can continue.')
-            exit(-1)
-        # if there is a '\n' at the end of the file, remove last empty item in list
-        if len(split_data[len(split_data) - 1]) == 0:
-            split_data.pop(len(split_data) - 1)
-        uint32_array = [[uint32(int(x[i:i+8], 16)) for i in range(0, len(x), 8)] for x in split_data]
+        # jump over magic bytes
+        f.read(8)
+        # start filling array
+        uint32_array = [[int.from_bytes(f.read(4), 'little') for __ in range(0, 64, 4)] for _ in range(element_amount)]
         return uint32_array
 
 serialize_dataset = serialize_cache
