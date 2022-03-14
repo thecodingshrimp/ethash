@@ -254,12 +254,12 @@ def write_to_file(file_path: str, data: uint32_hash_array):
         file_path (str): relative file path
         data (uint32_hash_array): uint_32[*][16]
     """
-    with open(file_path, 'w') as f:
+    with open(file_path, 'wb') as f:
         # write magic bytes
         f.write(b'\xad\xde\xe1\xfe\xfe\xca\xdd\xba')
         # write the real numbers
         for num_array in data:
-            f.write(''.join([int(num).to_bytes(4, 'little') for num in num_array]))
+            f.write(b''.join([int(num).to_bytes(4, 'little') for num in num_array]))
         
 def read_from_file(file_path: str, element_amount: int) -> uint32_hash_array:
     """Reads 64byte hashes (little endian) into uint_32[*][16] array
@@ -270,7 +270,7 @@ def read_from_file(file_path: str, element_amount: int) -> uint32_hash_array:
     Returns:
         list: uint_32[*][16] array
     """
-    with open(file_path, 'r') as f:
+    with open(file_path, 'rb') as f:
         # jump over magic bytes
         f.read(8)
         # start filling array
@@ -297,4 +297,3 @@ def isprime(x) -> bool:
          if x % i == 0:
              return False
     return True
-
