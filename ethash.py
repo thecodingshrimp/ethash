@@ -108,11 +108,16 @@ def hashimoto(dataset_lookup: Callable[[uint32_hash_array, int], uint32_hash]) -
         for _ in range(MIX_BYTES // HASH_BYTES):
             mix.extend(s)
         # mix in random dataset nodes
+        dataset_indexes = []
+        cache_indexes = []
         for i in range(ACCESSES):
             p = fnv(i ^ s[0], mix[i % w]) % (n // mixhashes) * mixhashes
             newdata = []
             for j in range(MIX_BYTES // HASH_BYTES):
-                newdata.extend(dataset_lookup(dataset, int(p + j)))
+                dataset_indexes.append(int(p + j))
+                dataset_lookup_result = dataset_lookup(dataset, int(p + j))
+                cache_indexes.append(dataset_lookup_result['cache_indexes'])
+                newdata.extend(dataset_lookup_result['result'])
             mix = list(map(fnv, mix, newdata))
         # compress mix
         cmix: List[int] = []
@@ -120,11 +125,14 @@ def hashimoto(dataset_lookup: Callable[[uint32_hash_array, int], uint32_hash]) -
             cmix.append(fnv(fnv(fnv(mix[i], mix[i+1]), mix[i+2]), mix[i+3]))
         return {
             "mix digest": serialize_hash(cmix),
-            "result": serialize_hash(keccak_256(s+cmix))
+            "result": serialize_hash(keccak_256(s+cmix)),
+            "dataset_indexes": dataset_indexes,
+            "cache_indexes": cache_indexes
         }
 
     return algorithm
 
+# TODO CHANGE RETURNS
 @hashimoto
 def hashimoto_light(cache: uint32_hash_array, index: int) -> uint32_hash:
     """Computes dataset item from cache.
@@ -149,9 +157,12 @@ def hashimoto_full(dataset: uint32_hash_array, x: int) -> uint32_hash:
     Returns:
         List[int]: uint_32[16]
     """
-    return dataset[x]
+    return {
+        "result": dataset[x],
+        "cache_indexes": []
+    }
 
-def calc_dataset_item(cache: uint32_hash_array, i: int) -> uint32_hash:
+def calc_dataset_item(cache: uint32_hash_array, i: int) -> Mapping:
     n = len(cache)
     r = HASH_BYTES // WORD_BYTES
     # initialize the mix
@@ -159,11 +170,16 @@ def calc_dataset_item(cache: uint32_hash_array, i: int) -> uint32_hash:
     mix[0] ^= i
     mix = keccak_512(mix)
     # fnv it with a lot of random cache nodes based on i
+    cache_indexes = []
     for j in range(DATASET_PARENTS):
         cache_index = fnv(i ^ j, mix[j % r])
+        cache_indexes.append(cache_index % n)
         mix = list(map(fnv, mix, cache[cache_index % n]))
     result = keccak_512(mix)
-    return result
+    return {
+        "result": result,
+        "cache_indexes": cache_indexes
+    }
 
 def get_cache_size(block_number: int) -> int:
     sz = CACHE_BYTES_INIT + CACHE_BYTES_GROWTH * (block_number // EPOCH_LENGTH)
